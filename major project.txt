@@ -1,0 +1,153 @@
+#define BLYNK_TEMPLATE_ID "TMPL3t5XUeRuJ"
+#define BLYNK_TEMPLATE_NAME "Smart parking"
+#define BLYNK_AUTH_TOKEN "3xP3yVJQUqrwRjXyl7MQBkbjHnF5zsW-"
+
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <ESP32Servo.h>
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <BlynkSimpleEsp32.h>
+
+// Pin definitions
+#define gate_ir 25
+#define slot1_ir 26
+#define slot2_ir 27
+#define gate_servo 33
+
+// OLED setup
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+// Servo object
+Servo gateservo;
+
+// Variables to hold sensor readings
+int slot1_sensor, slot2_sensor, gate_sensor;
+
+// Booking flags for slots (controlled via Blynk buttons)
+bool slot1_booked = false;
+bool slot2_booked = false;
+
+// Blynk auth token
+char auth[] = BLYNK_AUTH_TOKEN;
+
+// WiFi credentials (fill yours)
+char ssid[] = "pollution";
+char pass[] = "123456789";
+
+// Virtual pins for Blynk
+#define VPIN_SLOT1_LED V0
+#define VPIN_SLOT2_LED V1
+#define VPIN_SLOT1_BUTTON V2
+#define VPIN_SLOT2_BUTTON V3
+
+void setup() {
+  Serial.begin(115200);
+
+  // Setup pins
+  pinMode(gate_ir, INPUT);
+  pinMode(slot1_ir, INPUT);
+  pinMode(slot2_ir, INPUT);
+
+  // Initialize servo
+  gateservo.attach(gate_servo);
+  gateservo.write(0);  // Gate closed initially
+
+  // Initialize OLED
+  Wire.begin(4, 5);  // Check your SDA, SCL pins here
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("SSD1306 allocation failed");
+    for(;;);
+  }
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+
+  // Connect to WiFi and Blynk
+  Blynk.begin(auth, ssid, pass);
+}
+
+// Blynk handlers for booking buttons
+BLYNK_WRITE(VPIN_SLOT1_BUTTON) {
+  slot1_booked = param.asInt();
+  Serial.print("Slot 1 booked: ");
+  Serial.println(slot1_booked ? "YES" : "NO");
+}
+
+BLYNK_WRITE(VPIN_SLOT2_BUTTON) {
+  slot2_booked = param.asInt();
+  Serial.print("Slot 2 booked: ");
+  Serial.println(slot2_booked ? "YES" : "NO");
+}
+
+void loop() {
+  Blynk.run();
+
+  // Read sensor states (0 = occupied)
+  slot1_sensor = digitalRead(slot1_ir);
+  slot2_sensor = digitalRead(slot2_ir);
+  gate_sensor = digitalRead(gate_ir);
+
+  // Control servo gate
+  if(gate_sensor == 0){
+    Serial.println("Gate Open");
+    gateservo.write(90);
+  } else {
+    Serial.println("Gate Close");
+    gateservo.write(0);
+  }
+
+  // Determine status for slot1
+  String slot1_status = getSlotStatus(slot1_sensor, slot1_booked);
+  // Determine status for slot2
+  String slot2_status = getSlotStatus(slot2_sensor, slot2_booked);
+
+  // Print statuses to Serial
+  Serial.print("Slot 1: ");
+  Serial.println(slot1_status);
+  Serial.print("Slot 2: ");
+  Serial.println(slot2_status);
+
+  // Update Blynk LEDs
+  Blynk.virtualWrite(VPIN_SLOT1_LED, slot1_status == "OCCUPIED" ? 255 : 0);
+  Blynk.virtualWrite(VPIN_SLOT2_LED, slot2_status == "OCCUPIED" ? 255 : 0);
+
+  // Update OLED display with statuses
+  updateOLED(slot1_status, slot2_status, gate_sensor);
+
+  delay(200);
+}
+
+// Helper function: get slot status as string
+String getSlotStatus(int sensorValue, bool booked) {
+  if(sensorValue == 0) {
+    return "OCCUPIED";
+  } else if(booked) {
+    return "BOOKED";
+  } else {
+    return "EMPTY";
+  }
+}
+
+void updateOLED(String slot1_status, String slot2_status, int gate_state) {
+  display.clearDisplay();
+
+  display.setCursor(0, 0);
+  display.println("Slot 1");
+  display.setCursor(0, 10);
+  display.println("Status: " + slot1_status);
+
+  display.setCursor(0, 20);
+  display.println("Slot 2");
+  display.setCursor(0, 30);
+  display.println("Status: " + slot2_status);
+
+  display.setCursor(0, 40);
+  if(gate_state == 0) display.println("Gate: Open");
+  else display.println("Gate: Closed");
+
+  display.display();
+}
